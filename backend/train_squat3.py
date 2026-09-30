@@ -15,7 +15,7 @@ from sklearn.metrics import classification_report, accuracy_score
 import pickle
 
 # ── 1. Load dataset ───────────────────────────────────────────────
-df = pd.read_csv("squat_dataset_angles_only.csv")
+df = pd.read_csv("squat_dataset_phases.csv")
 
 FEATURES = ['knee_angle', 'hip_angle', 'back_angle']
 TARGETS  = ['knee_label', 'hip_label', 'back_label']
