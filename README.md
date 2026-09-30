@@ -1,4 +1,4 @@
-# train1
+
 # train1 – Squat Form Analysis (v3)
 
 Real-time squat form analysis using **MediaPipe Pose** and a **Random Forest** model.
