@@ -1,9 +1,6 @@
+# Pace – Squat Form Analysis
 
-# train1 – Squat Form Analysis (v3)
-
-Real-time squat form analysis using **MediaPipe Pose** and a **Random Forest** model.
-The camera detects the body, calculates joint angles, sends them to a FastAPI backend, and shows instant feedback with a color bar and a rep counter.
-
+Real-time squat form analysis with **MediaPipe Pose** and a machine-learning model, plus session reports and measurable goals (closed-loop coaching).
 Part of the **AI-Powered Smart Fitness Application** graduation project.
 
 ---
@@ -11,125 +8,162 @@ Part of the **AI-Powered Smart Fitness Application** graduation project.
 ## How it works
 
 ```
-Camera → MediaPipe (33 landmarks) → joint angles → FastAPI /predict → ML model → feedback + color
+Camera → MediaPipe (pose landmarks) → joint angles + movement phase → model → stable feedback + rep counting
+                                                                                  ↓
+                                              session log → session report → goal check → next goal
 ```
 
-1. **MediaPipe** detects the body landmarks from the camera (side view).
-2. Three angles are calculated using the **dot product**:
-   - **Knee angle:** hip – knee – ankle
-   - **Hip angle:** shoulder – hip – knee
-   - **Back angle:** torso lean from vertical
-3. The angles are sent to the backend, and the model predicts a label for **each joint** (knee, hip, back).
-4. The screen shows the feedback, and a rep is counted **only** if the user reached real depth **and** had no form errors during the whole rep.
-
-### Labels
+1. **MediaPipe** detects the body from a **side view** camera.
+2. Three angles are calculated with the **dot product**:
+   - **Knee:** hip – knee – ankle
+   - **Hip:** shoulder – hip – knee
+   - **Back:** torso lean from vertical
+3. The **movement phase** is detected: `0 standing · 1 descent · 2 bottom · 3 ascent`.
+4. The model predicts a label for **each joint**:
 
 | Label | Meaning | Color |
 |:----:|---------|-------|
-| 0 | Correct form | 🟢 Green |
-| 1 | Minor adjustment (type 1) | 🟡 Yellow |
-| 2 | Minor adjustment (type 2) | 🟠 Orange |
-| 3 | Incorrect – stop and fix | 🔴 Red |
+| 0 | Correct | 🟢 Green |
+| 1 | Above the correct range | 🟡 Yellow |
+| 2 | Below the correct range | 🟠 Orange |
+| 3 | Far outside the range | 🔴 Red |
+
+5. A rep is counted **only** if the knee reached depth, the hips really went down, and there was no lasting form error.
+6. After the session, a **report** is created with scores, warnings, and a **measurable goal** for the next session.
 
 ---
 
-## Files
-
-### `backend/` (v3 – latest)
-
-| File | Description |
-|------|-------------|
-| `squat_camera_v3.py` | Opens the camera, runs MediaPipe, calculates the angles, calls the API, and draws the feedback bar, rep counter, and movement state on screen. |
-| `main_v3.py` | FastAPI backend. Loads `squat_model.pkl` and exposes `POST /predict`, which takes the 3 angles and returns a label + feedback message for each joint. |
-| `train_squat3.py` | Trains the model on `squat_dataset_angles_only.csv` and saves it as `squat_model.pkl`. Prints the accuracy for each joint. |
-| `squat_model.pkl` | The trained model: `MultiOutputClassifier` with `RandomForestClassifier` (300 trees, max depth 15). |
-| `squat_dataset_angles_only.csv` | Training data: 6,000 rows. Inputs: `knee_angle`, `hip_angle`, `back_angle`. Outputs: `knee_label`, `hip_label`, `back_label`, `overall_label`. |
-| `pose_landmarker_full.task` | MediaPipe pose detection model (required by the camera script). |
-
-### Version 1 (old – for reference only)
-
-| File | Description |
-|------|-------------|
-| `backend/main.py` | v1 backend. Used 5 features (including cross-product values) and one overall label. |
-| `squat_train.py` | v1 training script. |
-| `squat_dataset.csv` | v1 dataset. |
-
-> ⚠️ v1 files are **not compatible** with the current `squat_model.pkl`.
-
----
-
-## Rep counting logic
-
-The camera script tracks the movement with a state machine:
+## Folder structure
 
 ```
-STANDING → DESCENDING → ASCENDING → STANDING
+backend/
+├── main_v3.py                 FastAPI server – loads the model chosen in current_model.txt
+├── squat_camera_v4.py         Camera app (latest)
+├── pose_landmarker_full.task  MediaPipe pose model
+│
+├── train_experiment.py        Train / register models – each one saved separately
+├── evaluate_model.py          Detailed evaluation of a model
+├── squat_dataset_phases.csv   Training data (40,581 frames · 424 reps · 40 people · synthetic)
+├── current_model.txt          Which experiment the app uses
+├── experiments/
+│   ├── experiments.xlsx       Experiment tracking sheet (Training · Live tests · How to use)
+│   └── exp_NNN_<name>/        model.pkl + info.json (settings, data, scores)
+│
+├── pace_report.py             Session metrics → report → goal check → next goal
+├── plot_session.py            Plots a session (angles over time, reps, errors)
+│
+├── sessions/                  (local only) per-frame + per-rep logs of each session
+├── profiles/                  (local only) user profile, goals, session reports
+│
+└── old: main.py, squat_camera_v3.py, train_squat3.py, squat_model.pkl, squat_dataset_angles_only.csv
 ```
 
-| Setting | Value | Meaning |
-|---------|:-----:|---------|
-| `DESCENT_TRIGGER` | 140° | Knee below this → the squat started |
-| `VALID_DEPTH_MAX` | 115° | Must reach this depth for the rep to count |
-| `ERROR_ZONE_MAX` | 120° | Form errors are only checked near the bottom |
-| `STAND_THRESHOLD` | 155° | Knee above this → back to standing |
-
-If there are **3 errors in a row**, a warning appears at the bottom of the screen.
+`sessions/` and `profiles/` contain personal training data and are **not** uploaded to GitHub.
 
 ---
 
 ## Environment
 
-Developed using **Anaconda** with a dedicated conda environment:
+Developed with **Anaconda**:
 
-- **Environment name:** `squat_env`
-- **Python version:** 3.11
-- **Libraries:** MediaPipe, OpenCV, NumPy, Pandas, scikit-learn, FastAPI, Uvicorn, Requests
-
-### Setup
-
-1. Install [Anaconda](https://www.anaconda.com/download)
-2. Create and activate the environment:
+- **Environment:** `squat_env`
+- **Python:** 3.11
 
 ```bash
 conda create -n squat_env python=3.11
 conda activate squat_env
-pip install mediapipe opencv-python numpy pandas scikit-learn fastapi uvicorn requests
+pip install mediapipe opencv-python numpy pandas scikit-learn fastapi uvicorn requests matplotlib openpyxl
 ```
 
-> Make sure `squat_env` is activated before running any script.
-> You should see `(squat_env)` at the start of your terminal line.
+> Always check you see `(squat_env)` at the start of the terminal line.
 
 ---
 
-## Run
+## Run the app
 
-You need **two terminals**, both inside `backend/` with `squat_env` activated.
+Two terminals, both inside `backend/` with `squat_env` active.
 
-**Terminal 1 – start the backend:**
+**Terminal 1 – server**
 
 ```bash
-cd backend
 uvicorn main_v3:app --port 8000
 ```
 
-**Terminal 2 – start the camera:**
+You should see `Using model: .../experiments/exp_.../model.pkl`.
+
+**Terminal 2 – camera**
 
 ```bash
-cd backend
-python squat_camera_v3.py
+python squat_camera_v4.py
 ```
 
-- Stand **sideways** to the camera, with your full body visible.
-- Press **Q** to quit.
-- If the bar shows `API unavailable`, the backend in Terminal 1 is not running.
+- Stand **sideways**, full body visible, straight for 2 seconds → counting starts.
+- Leaving the frame pauses counting.
+- Press **Q** to finish → summary + session report are created.
+
+Then:
+
+```bash
+python plot_session.py
+```
+
+Settings (timings, thresholds, `USER_ID`) are at the top of `squat_camera_v4.py`.
 
 ---
 
-## Retrain the model
+## Experiments (models are never overwritten)
 
 ```bash
-cd backend
-python train_squat3.py
+# keep an existing model as an experiment (copied, not retrained)
+python train_experiment.py --register squat_model.pkl --name original_v3 --notes "first phases model"
+
+# train a new experiment
+python train_experiment.py --name small_rf --trees 50 --depth 12 --notes "smaller + faster"
+python train_experiment.py --name tree8 --model tree --depth 8 --notes "single tree for the phone"
+
+# choose the model the app uses (then restart the server)
+python train_experiment.py --use exp_002_small_rf
+
+# list all experiments
+python train_experiment.py --list
 ```
 
-This overwrites `squat_model.pkl` with the new model.
+Every experiment is scored the **same way**, so results can be compared:
+
+- split **by person** (test people are never used for training)
+- macro F1 + balanced accuracy per joint
+- rep accuracy (whole rep judged correct / incorrect)
+- speed (ms per frame) and size (MB)
+
+A row is added to `experiments/experiments.xlsx` automatically (close Excel first).
+After every camera test, fill one row in the **Live tests** tab.
+
+> Change **one thing per experiment** and write it in `--notes`.
+
+---
+
+## Session report & goals
+
+`pace_report.py` runs automatically at the end of each session.
+
+| Metric | Definition |
+|--------|-----------|
+| Range of Motion | (180 − lowest knee angle) / 90 → 90° = 100% |
+| Knee / Hip / Back | % of rep frames where the joint was correct |
+| Movement Control | lowering time / 1 s → ≥ 1 s = 100% |
+| Warnings | number of reps with a lasting error, per joint |
+| Form Score | average of the scores above |
+
+- **Main focus** = joint with the most warnings.
+- **Goal** = warnings N → 60% of N (e.g. 5 → 3 → 1).
+- At ≤ 1 warning the weakness is resolved and the focus moves to the next one.
+- Goals are only compared when the **same model** was used.
+
+---
+
+## Current status & limitations
+
+- ✅ Real-time feedback, stable messages, false-rep protection, session reports, goal loop, experiment tracking.
+- ⚠️ The dataset is **synthetic** — high training scores do not prove it works on real people. Live tests and real recordings are needed.
+- ⚠️ Side view measures depth, hip and back. **Knee alignment (knee caving in) is not measured** — it needs a front view.
+- 🔜 Planned: model on the phone (Flutter), session reports + Pace Coach (RAG) on the server.

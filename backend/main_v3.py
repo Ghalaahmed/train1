@@ -13,7 +13,13 @@ from pydantic import BaseModel
 import pickle, os
 import pandas as pd
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "squat_model.pkl")
+HERE = os.path.dirname(os.path.abspath(__file__))
+try:   # model chosen with: python train_experiment.py --use exp_...
+    with open(os.path.join(HERE, "current_model.txt")) as f:
+        MODEL_PATH = os.path.join(HERE, f.read().strip(), "model.pkl")
+except FileNotFoundError:
+    MODEL_PATH = os.path.join(HERE, "squat_model.pkl")
+print("Using model:", MODEL_PATH)
 
 with open(MODEL_PATH, "rb") as f:
     model = pickle.load(f)

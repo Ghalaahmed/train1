@@ -1,0 +1,38 @@
+{
+  "exp_id": "exp_001_original_v3",
+  "version": "exp_001_original_v3",
+  "date": "2026-10-02 02:27",
+  "name": "original_v3",
+  "notes": "first phases model",
+  "dataset": "squat_dataset_phases.csv",
+  "dataset_hash": "e64c9625",
+  "rows": 40581,
+  "people": 40,
+  "features": [
+    "knee_angle",
+    "hip_angle",
+    "back_angle",
+    "phase_id"
+  ],
+  "targets": [
+    "knee_label",
+    "hip_label",
+    "back_label"
+  ],
+  "model_type": "MultiOutputClassifier",
+  "trees": 300,
+  "max_depth": 15,
+  "split": "person 80/20 (model trained elsewhere — test people may have been seen)",
+  "scores": {
+    "f1": [
+      100.0,
+      100.0,
+      98.7
+    ],
+    "f1_mean": 99.6,
+    "bal_mean": 99.6,
+    "rep_acc": 100.0,
+    "ms": 24.6
+  },
+  "size_mb": 20.9
+}
