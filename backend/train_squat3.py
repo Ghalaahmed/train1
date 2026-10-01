@@ -17,7 +17,7 @@ import pickle
 # ── 1. Load dataset ───────────────────────────────────────────────
 df = pd.read_csv("squat_dataset_phases.csv")
 
-FEATURES = ['knee_angle', 'hip_angle', 'back_angle']
+FEATURES = ['knee_angle', 'hip_angle', 'back_angle', 'phase_id']
 TARGETS  = ['knee_label', 'hip_label', 'back_label']
 
 X = df[FEATURES]

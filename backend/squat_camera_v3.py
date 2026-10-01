@@ -5,12 +5,20 @@ Squat analyzer — side view camera
 State machine  : STANDING → DESCENDING → ASCENDING → STANDING
 Feedback       : per-joint (knee / hip / back)
 Rep counted only when: reached real depth AND no form error throughout entire rep
+
+UPDATE (phases model):
+  • get_phase() computes the movement phase (0 standing, 1 descent, 2 bottom, 3 ascent)
+    with the same rule used to build squat_dataset_phases.csv
+  • phase_id is sent to the API with the 3 angles (model now expects 4 inputs)
+  • model is called in ALL phases → instant feedback anywhere (e.g. back lean mid-descent)
+  • a rep is marked wrong only if an error lasts >= 5 consecutive frames (no flicker)
 """
 
 import cv2
 import mediapipe as mp
 import numpy as np
 import requests
+from collections import deque
 
 MODEL_PATH = "pose_landmarker_full.task"
 
@@ -46,24 +54,46 @@ def angle(a, b, c):
 def label_color(label):
     return {0: (0,200,0), 1: (0,200,200), 2: (0,140,255), 3: (0,0,220)}.get(label, (80,80,80))
 
+# ── Phase detection (matches squat_dataset_phases.csv) ─────────────
+# 0 = standing   : smoothed knee >= 160
+# 2 = bottom     : knee almost not changing (< 0.4° per frame)
+# 1 = descent    : knee decreasing
+# 3 = ascent     : knee increasing
+PHASE_NAMES  = {0: 'standing', 1: 'descent', 2: 'bottom', 3: 'ascent'}
+knee_history = deque(maxlen=5)
+prev_smooth  = None
+
+def get_phase(knee):
+    global prev_smooth
+    knee_history.append(knee)
+    smooth = sum(knee_history) / len(knee_history)
+    if prev_smooth is None:
+        prev_smooth = smooth
+    change = smooth - prev_smooth
+    prev_smooth = smooth
+    if smooth >= 160:     return 0   # standing
+    if abs(change) < 0.4: return 2   # bottom
+    if change < 0:        return 1   # descent
+    return 3                         # ascent
+
 # ── State machine ──────────────────────────────────────────────────
 # STANDING → DESCENDING → ASCENDING → STANDING
 # Rep counted only when:
 #   • reached real depth (min_knee_angle ≤ 115°)
-#   • NO form error occurred at ANY point during the rep (DESCENDING + ASCENDING)
+#   • NO persistent form error (>= 5 consecutive frames) at any point during the rep
 
 rep_count        = 0
 state            = 'STANDING'
 error_streak     = 0
 min_knee_angle   = 180.0
-had_error_in_rep = False   # True if any frame during rep had label in (1,2,3)
+had_error_in_rep = False   # True if an error lasted >= ERROR_FRAMES frames during the rep
 prev_knee_angle  = 180.0
 
 STAND_THRESHOLD   = 155   # above this → STANDING
 DESCENT_TRIGGER   = 140   # below this → DESCENDING
 VALID_DEPTH_MAX   = 115   # must reach this to count as real squat
-ACTIVE_THRESHOLD  = 145   # only call model when knee < this
-ERROR_ZONE_MAX    = 120   # only flag form errors when near bottom (knee < this)
+ACTIVE_THRESHOLD  = 181   # call model in ALL phases (knee never reaches 181)
+ERROR_FRAMES      = 5     # error must persist this many frames to fail a rep
 # ──────────────────────────────────────────────────────────────────
 
 cap = cv2.VideoCapture(0)
@@ -82,6 +112,7 @@ with PoseLandmarker.create_from_options(options) as lmker:
         feedback = 'Stand in frame to begin'
         color    = (80, 80, 80)
         label    = -1
+        phase    = None
 
         if result.pose_landmarks:
             L      = result.pose_landmarks[0]
@@ -108,7 +139,10 @@ with PoseLandmarker.create_from_options(options) as lmker:
             cos_b      = np.dot(torso, [0, -1]) / (np.linalg.norm(torso) + 1e-6)
             back_angle = float(np.degrees(np.arccos(np.clip(cos_b, -1, 1))))
 
-            # ── Call model only when actively squatting ────────────
+            # ── Movement phase (sent to the model as 4th input) ────
+            phase = get_phase(knee_angle)
+
+            # ── Call model (all phases) ────────────────────────────
             if knee_angle < ACTIVE_THRESHOLD:
                 try:
                     r = requests.post(
@@ -117,6 +151,7 @@ with PoseLandmarker.create_from_options(options) as lmker:
                             'knee_angle': knee_angle,
                             'hip_angle':  hip_angle,
                             'back_angle': back_angle,
+                            'phase_id':   phase,
                         },
                         timeout=0.15,
                     )
@@ -146,8 +181,8 @@ with PoseLandmarker.create_from_options(options) as lmker:
                     had_error_in_rep = False        # reset for new rep
 
             elif state == 'DESCENDING':
-                # Only flag errors when near the bottom (not during transit)
-                if knee_angle < ERROR_ZONE_MAX and label in (1, 2, 3):
+                # Error only counts if it persists (not a single jittery frame)
+                if error_streak >= ERROR_FRAMES:
                     had_error_in_rep = True
                 if knee_angle <= min_knee_angle:
                     min_knee_angle = knee_angle
@@ -155,8 +190,7 @@ with PoseLandmarker.create_from_options(options) as lmker:
                     state = 'ASCENDING'
 
             elif state == 'ASCENDING':
-                # Only flag errors when still near the bottom
-                if knee_angle < ERROR_ZONE_MAX and label in (1, 2, 3):
+                if error_streak >= ERROR_FRAMES:
                     had_error_in_rep = True
                 if knee_angle > STAND_THRESHOLD:
                     state = 'STANDING'
@@ -194,13 +228,14 @@ with PoseLandmarker.create_from_options(options) as lmker:
         cv2.putText(frame, str(rep_count), (box_x + 50, box_y + 72),
                     cv2.FONT_HERSHEY_SIMPLEX, 2.0, (255, 255, 255), 3)
 
-        # ── State indicator ────────────────────────────────────────
+        # ── State + phase indicator ────────────────────────────────
         state_colors = {
             'STANDING':   (200, 200, 200),
             'DESCENDING': (0, 200, 255),
             'ASCENDING':  (0, 255, 100),
         }
-        cv2.putText(frame, state, (12, h - 12),
+        phase_txt = f'  | phase: {PHASE_NAMES[phase]}' if phase is not None else ''
+        cv2.putText(frame, state + phase_txt, (12, h - 12),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                     state_colors.get(state, (200, 200, 200)), 2)
 
@@ -219,4 +254,4 @@ with PoseLandmarker.create_from_options(options) as lmker:
             break
 
 cap.release()
-cv2.destroyAllWindows() 
+cv2.destroyAllWindows()
